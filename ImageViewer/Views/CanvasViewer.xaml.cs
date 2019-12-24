@@ -1,5 +1,5 @@
 ﻿using ImageViewer.Domain;
-using ImageViewer.Geometry;
+using ImageViewer.Events;
 using ImageViewer.Utils;
 using Microsoft.Win32;
 using System;
@@ -7,29 +7,44 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Shapes;
 
 namespace ImageViewer.Views
 {
     public partial class CanvasViewer : UserControl
     {
-        private AffineTransform initTransform = new AffineTransform();
-        private AffineTransform transform = new AffineTransform();
+        private enum MapToolMode { None, Panning, SelectZoom };
 
         private double screenWidth;
         private double screenHeight;
-        private Rectangle canvasArea;
 
-        private GDALReader gdalReader;
-
-        private MapImage mapImage;
+        private Rectangle drawRectangle;
 
         private Point origin;
         private Point start;
+
+        private int zoomLevel = 0;
+
+        private Point imageStartPoint;
+        private Point imageEndPoint;
+        private Point rectStartPoint;
+
+        private GDALReader gdalReader;
+        private MapImage mapImage;
+
+        private MapToolMode mapToolMode = MapToolMode.Panning;
 
         public CanvasViewer()
         {
             InitializeComponent();
             InitEvent();
+        }
+
+        private void Init()
+        {
+            zoomLevel = 0;
+            imageStartPoint = new Point(0, 0);
+            imageEndPoint = new Point(mapImage.ImageWidth, mapImage.ImageHeight);
         }
 
         private void InitEvent()
@@ -38,15 +53,13 @@ namespace ImageViewer.Views
             {
                 screenWidth = ActualWidth;
                 screenHeight = ActualHeight;
-                canvasArea = new Rectangle((int)ActualWidth, (int)ActualHeight);
             };
 
             this.SizeChanged += (object sender, SizeChangedEventArgs e) =>
             {
                 screenWidth = ActualWidth;
                 screenHeight = ActualHeight;
-                canvasArea = new Rectangle((int)ActualWidth, (int)ActualHeight);
-                FitCanvas();
+                //FitCanvas();
             };
         }
 
@@ -63,10 +76,12 @@ namespace ImageViewer.Views
 
                 gdalReader = new GDALReader();
                 gdalReader.Open(fileName);
-                HeaderInfo headerInfo = gdalReader.GetHeaderInfo();
-                mapImage = new MapImage(headerInfo, fileName);
+                mapImage = gdalReader.GetMapImageInfo();
 
+                Init();
                 FitCanvas();
+
+                EventAggregator.ImageOpenEvent.Publish(mapImage);
             }
         }
 
@@ -75,260 +90,196 @@ namespace ImageViewer.Views
             SaveFileDialog saveFileDialog = new SaveFileDialog();
             if (saveFileDialog.ShowDialog() == true)
             {
-                //GdalUtil.SubsetImage(gdalReader.FileName, saveFileDialog.FileName, imageStartPoint, imageEndPoint);
+                GdalUtil.SubsetImage(mapImage.FilePath, saveFileDialog.FileName, imageStartPoint, imageEndPoint);
             }
         }
 
         private void InitLoadImage()
         {
+            CanvasView.Children.Clear();
 
+            System.Drawing.Bitmap bitmap = gdalReader.GetBitmap(0, 0, mapImage.ImageWidth, mapImage.ImageHeight, 5);
+            Image image = new Image();
+            image.Source = ImageControl.BitmapToBitmapImage(bitmap, mapImage.ImageFormat);
+            image.Width = mapImage.ViewWidth;
+            image.Height = mapImage.ViewHeight;
+            image.Stretch = Stretch.Fill;
+
+            Canvas.SetLeft(image, 0);
+            Canvas.SetTop(image, 0);
+
+            CanvasView.Children.Add(image);
         }
 
         private void FitCanvas()
         {
             if (mapImage != null)
             {
-                Rectangle imageBound = mapImage.Bounds;
-                Rectangle destRect = canvasArea;
-                double sx = (double)destRect.Width / imageBound.Width;
-                double sy = (double)destRect.Height / imageBound.Height;
-                double s = Math.Min(sx, sy);
+                double imageWidth = mapImage.ImageWidth;
+                double imageHeight = mapImage.ImageHeight;
 
-                double dx = (double)destRect.Width / 2;
-                double dy = (double)destRect.Height / 2;
+                if (screenWidth / imageWidth < screenHeight / imageHeight)
+                {
+                    imageWidth = screenWidth;
+                    imageHeight *= screenWidth / imageWidth;
+                }
+                else
+                {
+                    imageWidth *= screenHeight / imageHeight;
+                    imageHeight = screenHeight;
+                }
 
-                CenterZoom(dx, dy, s, new AffineTransform(), true);
+                mapImage.ViewWidth = imageWidth;
+                mapImage.ViewHeight = imageHeight;
+
+                InitLoadImage();
+                CenterZoom();
             }
         }
 
-        private void CenterZoom(double dx, double dy, double scale, AffineTransform af, bool init)
+        public void CenterZoom()
         {
-            Console.WriteLine($"==============================================================");
+            if (mapImage != null)
+            {
+                double imageWidth = mapImage.ViewWidth;
+                double imageHeight = mapImage.ViewHeight;
 
-            af.PreConcatenate(AffineTransform.GetTranslateInstance(-dx, -dy));
-            af.PreConcatenate(AffineTransform.GetScaleInstance(scale, scale));
-            af.PreConcatenate(AffineTransform.GetTranslateInstance(dx, dy));
+                var tt = TranslateTransform;
+                if (screenWidth > imageWidth)
+                    tt.X = (screenWidth - imageWidth) / 2;
+                else
+                    tt.X = -(imageWidth - screenWidth) / 2;
 
-            transform = af;
-
-            if (init)
-                SyncScrollBars();
-            else
-                ReloadImage();
+                if (screenHeight > imageHeight)
+                    tt.Y = (screenHeight - imageHeight) / 2;
+                else
+                    tt.Y = -(imageHeight - screenHeight) / 2;
+            }
         }
 
-        private void SyncScrollBars()
+        private void Zoom(int value, Point point)
         {
-            AffineTransform af = transform;
-            double sx = af.GetScaleX(), sy = af.GetScaleY();
-            double tx = af.GetTranslateX(), ty = af.GetTranslateY();
-            if (tx > 0)
-                tx = 0;
-            if (ty > 0)
-                ty = 0;
+            double rate = 0.7;
+            if (value > 0) //Zoom in, 확대
+                rate = 1 / rate;
 
-            Rectangle imageBound = mapImage.Bounds;
-            int cw = canvasArea.Width, ch = canvasArea.Height;
+            double offsetX = Math.Abs(point.X * (1 - rate));
+            double offsetY = Math.Abs(point.Y * (1 - rate));
 
-            double imageWidth = imageBound.Width * sx;
-            double imageHeight = imageBound.Height * sy;
-            if (imageWidth > cw)
-            { /* image is wider than client area */
-                if (((int)-tx) > imageWidth - cw)
-                    tx = cw - imageWidth;
+            var tt = TranslateTransform;
+            if (value > 0) //확대
+            {
+                tt.X -= offsetX;
+                tt.Y -= offsetY;
+                zoomLevel += 1;
             }
             else
-            { /* image is narrower than client area */
-                tx = (cw - imageWidth) / 2; // center if too small.
+            {
+                if (zoomLevel < -4)
+                    return;
+
+                tt.X += offsetX;
+                tt.Y += offsetY;
+                zoomLevel -= 1;
             }
 
-            if (imageHeight > ch)
-            { /* image is higher than client area */
-                if (((int)-ty) > imageHeight - ch)
-                    ty = ch - imageHeight;
-            }
-            else
-            { /* image is less higher than client area */
-                ty = (ch - imageHeight) / 2; // center if too small.
-            }
+            mapImage.ViewWidth *= rate;
+            mapImage.ViewHeight *= rate;
 
-            /* update transform. */
-            AffineTransform scale = AffineTransform.GetScaleInstance(sx, sy);
-            if (tx < 0)
-                tx = 0;
-            AffineTransform translate = AffineTransform.GetTranslateInstance(tx, ty);
-
-            Console.WriteLine($"Translate : {tx}, {ty}");
-            Console.WriteLine($"Scale : {sx}, {sy}");
-
-            af = scale;
-            af.PreConcatenate(translate);
-
-            transform = af;
-            initTransform = af;
-
-            ReloadImage();
+            RedrawCanvas();
         }
 
-        private void ReloadImage()
+        private void RedrawCanvas()
+        {
+            double endWidth = mapImage.ViewWidth;
+            double endHeight = mapImage.ViewHeight;
+
+            double startX = 0;
+            double startY = 0;
+
+            var tt = TranslateTransform;
+            if (tt.X < 0)
+            {
+                startX = Math.Abs(tt.X);
+                if (endWidth > screenWidth)
+                {
+                    endWidth = startX + screenWidth;
+                }
+            }
+
+            if (tt.Y < 0)
+            {
+                startY = Math.Abs(tt.Y);
+                if (endHeight > screenHeight)
+                {
+                    endHeight = startY + screenHeight;
+                }
+            }
+
+            Point startPoint = new Point(startX, startY);
+            Point endPoint = new Point(endWidth, endHeight);
+
+            if (endWidth > screenWidth || endHeight > screenHeight)
+            {
+                zoomLevel = zoomLevel / 2;
+                zoomLevel = zoomLevel > 4 ? 1 : 5 - zoomLevel;
+                ReloadImage(startPoint, endPoint, zoomLevel);
+            }
+            else if (endWidth <= screenWidth || endHeight <= screenHeight)
+            {
+                ReloadImage(startPoint, endPoint, 5);
+            }
+        }
+
+        private void ReloadImage(Point start, Point end, int overview)
         {
             CanvasView.Children.Clear();
 
-            Rectangle clientRect = canvasArea;
-            Rectangle imageRect = SWT2DUtil.InverseTransformRect(transform, clientRect);
-            imageRect = imageRect.Intersection(mapImage.Bounds);
-            Rectangle destRect = SWT2DUtil.TransformRect(transform, imageRect, clientRect);
+            Image image = ReadImage(start, end, overview);
+            image.Width = mapImage.ViewWidth;
+            image.Height = mapImage.ViewHeight;
 
-            Console.WriteLine($"clientRect : {clientRect.Width}, {clientRect.Height}");
-            Console.WriteLine($"imageRect : {imageRect.X}, {imageRect.Y}, {imageRect.Width}, {imageRect.Height}");
-            Console.WriteLine($"destRect : {destRect.X}, {destRect.Y}, {destRect.Width}, {destRect.Height}");
-
-            Image image = ReadImage(mapImage, clientRect, imageRect);
-            image.Width = destRect.Width;
-
-            var height = destRect.Height;
-            if (height > clientRect.Height)
-            {
-                height = clientRect.Height;
-            }
-            image.Height = height;
-            image.Stretch = Stretch.Fill;
-
-            Canvas.SetLeft(image, destRect.X);
-            int top = destRect.Y;
-            if (destRect.Y < 0)
-            {
-                top = 0;
-            }
-            Canvas.SetTop(image, top);
+            Canvas.SetLeft(image, -((image.Width - (end.X + start.X)) / 2));
+            Canvas.SetTop(image, -((image.Height - (end.Y + start.Y)) / 2));
 
             CanvasView.Children.Add(image);
         }
 
-        private Image ReadImage(MapImage mapImage, Rectangle clientRect, Rectangle imageRect)
+        private Image ReadImage(Point startPoint, Point endPoint, int overview)
         {
-            int imageWidth = mapImage.HeaderInfo.Width;
-            int imageHeight = mapImage.HeaderInfo.Height;
-
-            int windowWidth = clientRect.Width;
-            int windowHeight = clientRect.Height;
+            int imageWidth = mapImage.ImageWidth;
+            int imageHeight = mapImage.ImageHeight;
 
             int width = 0;
             int height = 0;
 
-            if (windowWidth > windowHeight)
+            if (screenWidth > screenHeight)
             {
-                width = (int)(((float)windowHeight / imageHeight) * imageWidth);
-                height = windowHeight;
+                width = (int)(((float)screenHeight / imageHeight) * imageWidth);
+                height = (int)screenHeight;
             }
             else
             {
-                width = windowWidth;
-                height = (int)(((float)windowWidth / imageWidth) * imageHeight);
+                width = (int)screenWidth;
+                height = (int)(((float)screenWidth / imageWidth) * imageHeight);
             }
 
-            System.Drawing.Bitmap bitmap = gdalReader.CreateBitmap(imageRect.X, imageRect.Y, imageRect.Width, imageRect.Height, width, height, 4);
+            Point start = ScreenToImage(startPoint);
+            Point end = ScreenToImage(endPoint);
 
-            Console.WriteLine($"Bitmap : {bitmap.Width}, {bitmap.Height}");
+            System.Drawing.Bitmap bitmap = gdalReader.GetBitmap((int)start.X, (int)start.Y, (int)end.X, (int)end.Y, overview);
 
             Image image = new Image();
             image.Source = ImageControl.BitmapToBitmapImage(bitmap, mapImage.ImageFormat);
-
             return image;
         }
 
-        private void CanvasMouseWheel(object sender, MouseWheelEventArgs e)
+        private void CanvasMousWheel(object sender, MouseWheelEventArgs e)
         {
             if (mapImage != null)
             {
                 Point point = e.GetPosition(CanvasView);
-
-                double sx = initTransform.GetScaleX();
-                double sy = initTransform.GetScaleY();
-                double tx = initTransform.GetTranslateX();
-                double ty = initTransform.GetTranslateY();
-
-                //double zoom = e.Delta > 0 ? .2 : -.2;
-
-                //Console.WriteLine($"======================================================");
-                //Console.WriteLine($"Point : {point.X}, {point.Y}");
-                //Console.WriteLine($"Scale : {sx}, {sy}");
-                //Console.WriteLine($"Translate : {tx}, {ty}");
-
-                //double rate = 0.9;
-                //if (e.Delta > 0) //Zoom in, 확대
-                //    rate = 1 / rate;
-                //double offsetX = Math.Abs(point.X * (1 - rate));
-                //double offsetY = Math.Abs(point.Y * (1 - rate));
-
-                //Console.WriteLine($"offset : {offsetX}, {offsetY}");
-
-                //if (e.Delta > 0) //확대
-                //{
-                //    tx -= offsetX;
-                //    ty -= offsetY;
-                //}
-                //else
-                //{
-                //    tx += offsetX;
-                //    ty += offsetY;
-                //}
-
-                //sx *= rate;
-                //sy *= rate;
-
-                //AffineTransform af = transform;
-                //af.PreConcatenate(AffineTransform.GetTranslateInstance(-tx, -tx));
-                //af.PreConcatenate(AffineTransform.GetScaleInstance(rate, rate));
-                //af.PreConcatenate(AffineTransform.GetTranslateInstance(tx, tx));
-
-                //transform = af;
-
-                //Console.WriteLine($"Translate2 : {transform.GetTranslateX()}, {transform.GetTranslateY()}");
-                //Console.WriteLine($"Scale2 : {transform.GetScaleX()}, {transform.GetScaleY()}");
-
-                //SyncScrollBars();
-
-                //Console.WriteLine($"Translate3 : {transform.GetTranslateX()}, {transform.GetTranslateY()}");
-                //Console.WriteLine($"Scale3 : {transform.GetScaleX()}, {transform.GetScaleY()}");
-
-                var st = ScaleTransform;
-                var tt = TranslateTransform;
-
-                double zoom = e.Delta > 0 ? .2 : -.2;
-                if (!(e.Delta > 0) && (st.ScaleX < .4 || st.ScaleY < .4))
-                    return;
-
-                double abosuluteX = point.X * st.ScaleX + tt.X;
-                double abosuluteY = point.Y * st.ScaleY + tt.Y;
-
-                st.ScaleX += zoom;
-                st.ScaleY += zoom;
-
-                tt.X = abosuluteX - point.X * st.ScaleX;
-                tt.Y = abosuluteY - point.Y * st.ScaleY;
-
-                Console.WriteLine($"======================================================");
-                Console.WriteLine($"Point : {point.X}, {point.Y}");
-                Console.WriteLine($"Scale : {sx}, {sy}");
-                Console.WriteLine($"Translate : {tx}, {ty}");
-
-                Console.WriteLine($"Scale2 : {st.ScaleX}, {st.ScaleY}");
-                Console.WriteLine($"Translate2 : {tt.X}, {tt.Y}");
-
-                AffineTransform af = initTransform;
-                //AffineTransform scale = AffineTransform.GetScaleInstance(sx * st.ScaleX, sy * st.ScaleY);
-                AffineTransform translate = AffineTransform.GetTranslateInstance(tx + tt.X, ty + tt.Y);
-
-                af = translate;
-                af.PreConcatenate(translate);
-
-                transform = af;
-
-                Console.WriteLine($"Scale3 : {transform.GetScaleX()}, {transform.GetScaleY()}");
-                Console.WriteLine($"Translate3 : {transform.GetTranslateX()}, {transform.GetTranslateY()}");
-
-                ReloadImage();
+                Zoom(e.Delta, point);
             }
         }
 
@@ -336,11 +287,15 @@ namespace ImageViewer.Views
         {
             if (mapImage != null)
             {
+                rectStartPoint = e.GetPosition(CanvasView);
+
                 var tt = TranslateTransform;
                 start = e.GetPosition(this);
                 origin = new Point(tt.X, tt.Y);
                 CanvasView.CaptureMouse();
-                this.Cursor = Cursors.Hand;
+
+                if (mapToolMode == MapToolMode.Panning)
+                    Cursor = Cursors.Hand;
             }
         }
 
@@ -350,13 +305,60 @@ namespace ImageViewer.Views
             {
                 if (CanvasView.IsMouseCaptured)
                 {
-                    var tt = TranslateTransform;
-                    Vector v = start - e.GetPosition(this);
-                    tt.X = origin.X - v.X;
-                    tt.Y = origin.Y - v.Y;
+                    switch (mapToolMode)
+                    {
+                        case MapToolMode.Panning:
+                            var tt = TranslateTransform;
+                            Vector v = start - e.GetPosition(this);
+                            tt.X = origin.X - v.X;
+                            tt.Y = origin.Y - v.Y;
 
-                    //RedrawCanvas();
+                            RedrawCanvas();
+                            break;
+                        case MapToolMode.SelectZoom:
+                            Image image = (Image)CanvasView.Children[0];
+                            var position = e.GetPosition(CanvasView);
+                            if (position.X < 0)
+                                position.X = 0;
+                            else if (position.X > image.Width)
+                                position.X = image.Width;
+
+                            if (position.Y < 0)
+                                position.Y = 0;
+                            else if (position.Y > image.Height)
+                                position.Y = image.Height;
+
+                            if (e.LeftButton == MouseButtonState.Pressed)
+                            {
+                                CanvasView.Children.Remove(drawRectangle);
+                                Point point = new Point();
+
+                                if (position.X - rectStartPoint.X > 0)
+                                    point.X = rectStartPoint.X;
+                                else
+                                    point.X = position.X;
+
+                                if (position.Y - rectStartPoint.Y > 0)
+                                    point.Y = rectStartPoint.Y;
+                                else
+                                    point.Y = position.Y;
+
+                                double width = Math.Abs(position.X - rectStartPoint.X);
+                                double height = Math.Abs(position.Y - rectStartPoint.Y);
+
+                                drawRectangle = CreateRectangle(point, width, height);
+                                CanvasView.Children.Add(drawRectangle);
+                            }
+                            break;
+                    }
                 }
+
+                var p = e.GetPosition(CanvasView);
+                Point imagePoint = ScreenToImage(p);
+                Point lonlat = gdalReader.ImageToWorld(imagePoint.X, imagePoint.Y);
+
+                string statusLine = $"Map({lonlat.X}, {lonlat.Y}), Image({imagePoint.X}, {imagePoint.Y}), Display({p.X}, {p.Y})";
+                EventAggregator.MouseMoveEvent.Publish(statusLine);
             }
         }
 
@@ -364,7 +366,14 @@ namespace ImageViewer.Views
         {
             if (mapImage != null)
             {
-                this.Cursor = Cursors.Arrow;
+                switch (mapToolMode)
+                {
+                    case MapToolMode.Panning:
+                        Cursor = Cursors.Arrow;
+                        break;
+                    case MapToolMode.SelectZoom:
+                        break;
+                }
                 CanvasView.ReleaseMouseCapture();
             }
         }
@@ -373,7 +382,10 @@ namespace ImageViewer.Views
         {
             if (mapImage != null)
             {
-
+                if (mapToolMode == MapToolMode.SelectZoom)
+                {
+                    CanvasView.Children.Remove(drawRectangle);
+                }
             }
         }
 
@@ -381,18 +393,86 @@ namespace ImageViewer.Views
         {
             if (mapImage != null)
             {
-                // reset zoom
-                var st = ScaleTransform;
-                st.ScaleX = 1.0;
-                st.ScaleY = 1.0;
-
-                // reset pan
-                var tt = TranslateTransform;
-                tt.X = 0.0;
-                tt.Y = 0.0;
-
+                Init();
                 FitCanvas();
             }
+        }
+
+        public void ZoomIn()
+        {
+            if (mapImage != null)
+            {
+                var image = (Image)CanvasView.Children[0];
+                Point point = new Point(image.Width / 2, image.Height / 2);
+                Zoom(1, point);
+            }
+        }
+
+        public void ZoomOut()
+        {
+            if (mapImage != null)
+            {
+                var image = (Image)CanvasView.Children[0];
+                Point point = new Point(image.Width / 2, image.Height / 2);
+                Zoom(-1, point);
+            }
+        }
+
+        public void SelectZoomToggle(bool isChecked)
+        {
+            if (isChecked)
+            {
+                Cursor = Cursors.Cross;
+                mapToolMode = MapToolMode.SelectZoom;
+            }
+            else
+            {
+                Cursor = Cursors.Arrow;
+                mapToolMode = MapToolMode.Panning;
+                CanvasView.Children.Remove(drawRectangle);
+            }
+        }
+
+        public void ComboBoxChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (mapImage != null)
+            {
+                ComboBox combo = sender as ComboBox;
+                ComboBoxItem item = (ComboBoxItem)combo.SelectedItem;
+
+                RotateTransform.CenterX = CanvasView.ActualWidth / 2;
+                RotateTransform.CenterY = CanvasView.ActualHeight / 2;
+                RotateTransform.Angle = Int32.Parse(item.Content.ToString());
+            }
+        }
+
+        public Point ScreenToImage(Point point)
+        {
+            return new Point()
+            {
+                X = point.X / mapImage.ViewWidth * mapImage.ImageWidth,
+                Y = point.Y / mapImage.ViewHeight * mapImage.ImageHeight
+            };
+        }
+
+        private Rectangle CreateRectangle(Point point, double width, double height)
+        {
+            Rectangle rect = new Rectangle();
+            rect.Stroke = Brushes.Red;
+
+            SolidColorBrush brush = new SolidColorBrush();
+            brush.Color = Colors.Red;
+            brush.Opacity = 0.2;
+            rect.Fill = brush;
+
+            rect.StrokeThickness = 3;
+            rect.StrokeDashArray = DoubleCollection.Parse("4, 3");
+            rect.Width = width;
+            rect.Height = height;
+
+            Canvas.SetLeft(rect, point.X);
+            Canvas.SetTop(rect, point.Y);
+            return rect;
         }
     }
 }

@@ -1,5 +1,4 @@
-﻿using ImageViewer.Geometry;
-using System.Drawing.Imaging;
+﻿using System.Drawing.Imaging;
 
 namespace ImageViewer.Domain
 {
@@ -10,18 +9,24 @@ namespace ImageViewer.Domain
 
         public HeaderInfo HeaderInfo { get; set; }
 
-        public Rectangle Bounds { get; set; }
-
         public ImageFormat ImageFormat { get; set; }
 
         public double ViewWidth { get; set; }
 
         public double ViewHeight { get; set; }
 
+        public int ImageWidth { get; set; }
+
+        public int ImageHeight { get; set; }
+
+        public Boundary ImageBoundary { get; internal set; }
+
         public MapImage(HeaderInfo headerInfo, string filePath)
         {
             this.HeaderInfo = headerInfo;
             this.FilePath = filePath;
+            this.ImageWidth = headerInfo.Width;
+            this.ImageHeight = headerInfo.Height;
 
             ImageFormat imageFormat = ImageFormat.Bmp;
             if (filePath.ToLower().Contains(".png") || filePath.ToLower().Contains(".tif"))
@@ -30,8 +35,6 @@ namespace ImageViewer.Domain
                 imageFormat = ImageFormat.Jpeg;
 
             this.ImageFormat = imageFormat;
-
-            this.Bounds = new Rectangle(0, 0, headerInfo.Width, headerInfo.Height);
         }
     }
 }

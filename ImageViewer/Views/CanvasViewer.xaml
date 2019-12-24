@@ -6,8 +6,8 @@
              xmlns:local="clr-namespace:ImageViewer.Views"
              mc:Ignorable="d" 
              d:DesignHeight="450" d:DesignWidth="800">
-    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-        <Canvas x:Name="CanvasView" MouseWheel="CanvasMouseWheel" MouseMove="CanvasMouseMove" 
+    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Background="Black">
+        <Canvas x:Name="CanvasView" MouseWheel="CanvasMousWheel" MouseMove="CanvasMouseMove" 
                     MouseLeftButtonDown="CanvasMouseLeftDown" MouseLeftButtonUp="CanvasMouseLeftUp"
                     MouseRightButtonUp="CanvasMouseRightButtonUp">
             <Canvas.RenderTransform>

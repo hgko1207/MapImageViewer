@@ -1,4 +1,6 @@
 ﻿using ImageViewer.Domain;
+using ImageViewer.Events;
+using ImageViewer.Images;
 using OSGeo.GDAL;
 using OSGeo.OSR;
 using System;
@@ -71,6 +73,18 @@ namespace ImageViewer.Utils
             Console.WriteLine("Completed.");
         }
 
+        public MapImage GetMapImageInfo()
+        {
+            MapImage mapImage = new MapImage(GetHeaderInfo(), filePath);
+            Boundary ImageBoundary = null;
+            if (GeometryControl.GetImageBoundary(dataset, out double minX, out double minY, out double maxX, out double maxY))
+                ImageBoundary = new Boundary(minX, minY, maxX, maxY, 0, 0);
+
+            mapImage.ImageBoundary = ImageBoundary;
+
+            return mapImage;
+        }
+
         /**
         * 헤더 생성
         */
@@ -87,7 +101,6 @@ namespace ImageViewer.Utils
             headerInfo.Description = dataset.GetDescription();
 
             SetMapInfo(headerInfo);
-
 
             return headerInfo;
         }
@@ -107,10 +120,10 @@ namespace ImageViewer.Utils
             }
         }
 
-        public Bitmap CreateBitmap(int xOff, int yOff, int xSize, int ySize, int width, int height, int overview)
+        public Bitmap GetBitmap(int xOff, int yOff, int xSize, int ySize, int overview)
         {
             if (dataset.RasterCount == 1)
-                return ReadGrayBitmap(xOff, yOff, xSize, ySize, width, height, overview);
+                return ReadGrayBitmap(xOff, yOff, xSize, ySize, overview);
             else
                 return ReadRgbBitmap(xOff, yOff, xSize, ySize);
         }
@@ -136,7 +149,7 @@ namespace ImageViewer.Utils
                 xSize = bandWidth - xOff;
             }
 
-            if (yOff + height > bandWHeight)
+            if (yOff + ySize > bandWHeight)
             {
                 ySize = bandWHeight - yOff;
             }
@@ -149,6 +162,65 @@ namespace ImageViewer.Utils
 
             int[] data = new int[width * height];
             band.ReadRaster(xOff, yOff, xSize, ySize, data, width, height, 0, 0);
+
+            Bitmap bitmap = new Bitmap(width, height, PixelFormat.Format24bppRgb);
+            BitmapData bitmapData = bitmap.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.ReadWrite, bitmap.PixelFormat);
+
+            int stride = Math.Abs(bitmapData.Stride);
+            byte[] bytes = new byte[height * stride];
+
+            for (int row = 0; row < height; row++)
+            {
+                for (int col = 0; col < width; col++)
+                {
+                    int num = data[row * width + col];
+                    byte value = (byte)((num - min) * stretchRate);
+                    bytes[row * stride + col * 3] = value;
+                    bytes[row * stride + col * 3 + 1] = value;
+                    bytes[row * stride + col * 3 + 2] = value;
+                    //bytes[row * stride + col * 4 + 3] = 255;
+                }
+            }
+
+            Marshal.Copy(bytes, 0, bitmapData.Scan0, bytes.Length);
+            bitmap.UnlockBits(bitmapData);
+            return bitmap;
+        }
+
+        private Bitmap ReadGrayBitmap(int xOffset, int yOffset, int xSize, int ySize, int overview)
+        {
+            Band band = dataset.GetRasterBand(1);
+            if (overview > 0)
+            {
+                band = band.GetOverview(overview - 1);
+            }
+
+            int level = levels[overview - 1];
+            int width = (xSize - xOffset) / level;
+            int height = (ySize - yOffset) / level;
+            int xOff = xOffset / level;
+            int yOff = yOffset / level;
+
+            int bandWidth = band.XSize;
+            int bandWHeight = band.YSize;
+            if (xOff + width > bandWidth)
+            {
+                width = bandWidth - xOff;
+            }
+
+            if (yOff + height > bandWHeight)
+            {
+                height = bandWHeight - yOff;
+            }
+
+            double[] minmax = new double[2];
+            band.ComputeRasterMinMax(minmax, 0);
+            double min = minmax[0];
+            double max = minmax[1];
+            double stretchRate = 255 / (max - min);
+
+            int[] data = new int[width * height];
+            band.ReadRaster(xOff, yOff, width, height, data, width, height, 0, 0);
 
             Bitmap bitmap = new Bitmap(width, height, PixelFormat.Format24bppRgb);
             BitmapData bitmapData = bitmap.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.ReadWrite, bitmap.PixelFormat);
@@ -354,7 +426,7 @@ namespace ImageViewer.Utils
 
         public int ProgressFunc(double Complete, IntPtr Message, IntPtr Data)
         {
-            //EventAggregator.ProgressEvent.Publish((int)(Complete * 100));
+            EventAggregator.ProgressEvent.Publish((int)(Complete * 100));
             //Console.Write("Processing ... " + Complete * 100 + "% Completed.");
             //if (Message != IntPtr.Zero)
             //    Console.Write(" Message:" + Marshal.PtrToStringAnsi(Message));
@@ -363,6 +435,32 @@ namespace ImageViewer.Utils
 
             //Console.WriteLine("");
             return 1;
+        }
+
+        public System.Windows.Point ImageToWorld(double x, double y)
+        {
+            double[] adfGeoTransform = new double[6];
+            double[] p = new double[3];
+
+            dataset.GetGeoTransform(adfGeoTransform);
+            p[0] = adfGeoTransform[0] + adfGeoTransform[1] * x + adfGeoTransform[2] * y;
+            p[1] = adfGeoTransform[3] + adfGeoTransform[4] * x + adfGeoTransform[5] * y;
+
+            SpatialReference src = new SpatialReference("");
+            string s = dataset.GetProjectionRef();
+            src.ImportFromWkt(ref s);
+
+            SpatialReference wgs84 = new SpatialReference("");
+            wgs84.SetWellKnownGeogCS("WGS84");
+
+            CoordinateTransformation ct = new CoordinateTransformation(src, wgs84);
+            ct.TransformPoint(p);
+
+            ct.Dispose();
+            wgs84.Dispose();
+            src.Dispose();
+
+            return new System.Windows.Point(p[0], p[1]);
         }
     }
 }
