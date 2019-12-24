@@ -1,12 +1,11 @@
 ﻿using ImageViewer.Domain;
 using OSGeo.GDAL;
+using OSGeo.OSR;
 using System;
-using System.Collections.Generic;
+using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Runtime.InteropServices;
 
 namespace ImageViewer.Utils
 {
@@ -86,8 +85,271 @@ namespace ImageViewer.Utils
 
             headerInfo.DataType = Gdal.GetDataTypeName(dataset.GetRasterBand(1).DataType);
             headerInfo.Description = dataset.GetDescription();
-    
+
+            SetMapInfo(headerInfo);
+
+
             return headerInfo;
+        }
+
+        private void SetMapInfo(HeaderInfo headerInfo)
+        {
+            string projection = dataset.GetProjectionRef();
+            if (!string.IsNullOrEmpty(projection))
+            {
+                SpatialReference sr = new SpatialReference(projection);
+
+                MapInfo mapInfo = new MapInfo();
+                mapInfo.Projcs = sr.GetAttrValue("PROJCS", 0);
+                mapInfo.Unit = sr.GetAttrValue("UNIT", 0);
+
+                headerInfo.MapInfo = mapInfo;
+            }
+        }
+
+        public Bitmap CreateBitmap(int xOff, int yOff, int xSize, int ySize, int width, int height, int overview)
+        {
+            if (dataset.RasterCount == 1)
+                return ReadGrayBitmap(xOff, yOff, xSize, ySize, width, height, overview);
+            else
+                return ReadRgbBitmap(xOff, yOff, xSize, ySize);
+        }
+
+        private Bitmap ReadGrayBitmap(int xOffset, int yOffset, int xSize, int ySize, int width, int height, int overview)
+        {
+            Band band = dataset.GetRasterBand(1);
+            if (overview > 0)
+            {
+                band = band.GetOverview(overview - 1);
+            }
+
+            int level = levels[overview - 1];
+            xSize = xSize / level;
+            ySize = ySize / level;
+            int xOff = xOffset / level;
+            int yOff = yOffset / level;
+
+            int bandWidth = band.XSize;
+            int bandWHeight = band.YSize;
+            if (xOff + xSize > bandWidth)
+            {
+                xSize = bandWidth - xOff;
+            }
+
+            if (yOff + height > bandWHeight)
+            {
+                ySize = bandWHeight - yOff;
+            }
+
+            double[] minmax = new double[2];
+            band.ComputeRasterMinMax(minmax, 0);
+            double min = minmax[0];
+            double max = minmax[1];
+            double stretchRate = 255 / (max - min);
+
+            int[] data = new int[width * height];
+            band.ReadRaster(xOff, yOff, xSize, ySize, data, width, height, 0, 0);
+
+            Bitmap bitmap = new Bitmap(width, height, PixelFormat.Format24bppRgb);
+            BitmapData bitmapData = bitmap.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.ReadWrite, bitmap.PixelFormat);
+
+            int stride = Math.Abs(bitmapData.Stride);
+            byte[] bytes = new byte[height * stride];
+
+            for (int row = 0; row < height; row++)
+            {
+                for (int col = 0; col < width; col++)
+                {
+                    int num = data[row * width + col];
+                    byte value = (byte)((num - min) * stretchRate);
+                    bytes[row * stride + col * 3] = value;
+                    bytes[row * stride + col * 3 + 1] = value;
+                    bytes[row * stride + col * 3 + 2] = value;
+                    //bytes[row * stride + col * 4 + 3] = 255;
+                }
+            }
+
+            Marshal.Copy(bytes, 0, bitmapData.Scan0, bytes.Length);
+            bitmap.UnlockBits(bitmapData);
+            return bitmap;
+        }
+
+        private Bitmap ReadRgbBitmap(int xOffset, int yOffset, int width, int height)
+        {
+            int[] bandMap = new int[4] { 0, 0, 0, 0 };
+            int channelCount = 1;
+            bool hasAlpha = false;
+            bool isIndexed = false;
+            int channelSize = 8;
+            ColorTable colorTable = null;
+
+
+            if (xOffset + width > dataset.RasterXSize)
+            {
+                width = dataset.RasterXSize - xOffset;
+            }
+
+            if (yOffset + height > dataset.RasterYSize)
+            {
+                height = dataset.RasterYSize - yOffset;
+            }
+
+            // Evaluate the bands and find out a proper image transfer format
+            for (int i = 0; i < dataset.RasterCount; i++)
+            {
+                Band band = dataset.GetRasterBand(i + 1);
+                if (Gdal.GetDataTypeSize(band.DataType) > 8)
+                    channelSize = 16;
+
+                switch (band.GetRasterColorInterpretation())
+                {
+                    case ColorInterp.GCI_AlphaBand:
+                        channelCount = 4;
+                        hasAlpha = true;
+                        bandMap[3] = i + 1;
+                        break;
+                    case ColorInterp.GCI_BlueBand:
+                        if (channelCount < 3)
+                            channelCount = 3;
+                        bandMap[0] = i + 1;
+                        break;
+                    case ColorInterp.GCI_RedBand:
+                        if (channelCount < 3)
+                            channelCount = 3;
+                        bandMap[2] = i + 1;
+                        break;
+                    case ColorInterp.GCI_GreenBand:
+                        if (channelCount < 3)
+                            channelCount = 3;
+                        bandMap[1] = i + 1;
+                        break;
+                    case ColorInterp.GCI_PaletteIndex:
+                        colorTable = band.GetRasterColorTable();
+                        isIndexed = true;
+                        bandMap[0] = i + 1;
+                        break;
+                    case ColorInterp.GCI_GrayIndex:
+                        isIndexed = true;
+                        bandMap[0] = i + 1;
+                        break;
+                    default:
+                        // we create the bandmap using the dataset ordering by default
+                        if (i < 4 && bandMap[i] == 0)
+                        {
+                            if (channelCount < i)
+                                channelCount = i;
+                            bandMap[i] = i + 1;
+                        }
+                        break;
+                }
+            }
+
+            // find out the pixel format based on the gathered information
+            PixelFormat pixelFormat;
+            DataType dataType;
+            int pixelSpace;
+
+            if (isIndexed)
+            {
+                pixelFormat = PixelFormat.Format8bppIndexed;
+                dataType = DataType.GDT_Byte;
+                pixelSpace = 1;
+            }
+            else
+            {
+                if (channelCount == 1)
+                {
+                    if (channelSize > 8)
+                    {
+                        pixelFormat = PixelFormat.Format16bppGrayScale;
+                        dataType = DataType.GDT_Int16;
+                        pixelSpace = 2;
+                    }
+                    else
+                    {
+                        pixelFormat = PixelFormat.Format24bppRgb;
+                        channelCount = 3;
+                        dataType = DataType.GDT_Byte;
+                        pixelSpace = 3;
+                    }
+                }
+                else
+                {
+                    if (hasAlpha)
+                    {
+                        if (channelSize > 8)
+                        {
+                            pixelFormat = PixelFormat.Format64bppArgb;
+                            dataType = DataType.GDT_UInt16;
+                            pixelSpace = 8;
+                        }
+                        else
+                        {
+                            pixelFormat = PixelFormat.Format32bppArgb;
+                            dataType = DataType.GDT_Byte;
+                            pixelSpace = 4;
+                        }
+                        channelCount = 4;
+                    }
+                    else
+                    {
+                        if (channelSize > 8)
+                        {
+                            pixelFormat = PixelFormat.Format48bppRgb;
+                            dataType = DataType.GDT_UInt16;
+                            pixelSpace = 6;
+                        }
+                        else
+                        {
+                            pixelFormat = PixelFormat.Format24bppRgb;
+                            dataType = DataType.GDT_Byte;
+                            pixelSpace = 3;
+                        }
+                        channelCount = 3;
+                    }
+                }
+            }
+
+            Bitmap bitmap = new Bitmap(width, height, pixelFormat);
+
+            if (isIndexed)
+            {
+                if (colorTable != null)
+                {
+                    ColorPalette pal = bitmap.Palette;
+                    for (int i = 0; i < colorTable.GetCount(); i++)
+                    {
+                        ColorEntry ce = colorTable.GetColorEntry(i);
+                        pal.Entries[i] = Color.FromArgb(ce.c4, ce.c1, ce.c2, ce.c3);
+                    }
+                    bitmap.Palette = pal;
+                }
+                else
+                {
+                    ColorPalette pal = bitmap.Palette;
+                    for (int i = 0; i < 255; i++)
+                    {
+                        pal.Entries[i] = Color.FromArgb(255, i, i, i);
+                    }
+                    bitmap.Palette = pal;
+                }
+            }
+
+            // Use GDAL raster reading methods to read the image data directly into the Bitmap
+            BitmapData bitmapData = bitmap.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.ReadWrite, pixelFormat);
+
+            try
+            {
+                int stride = bitmapData.Stride;
+                IntPtr buf = bitmapData.Scan0;
+                dataset.ReadRaster(xOffset, yOffset, width, height, buf, width, height, dataType, channelCount, bandMap, pixelSpace, stride, 1);
+            }
+            finally
+            {
+                bitmap.UnlockBits(bitmapData);
+            }
+
+            return bitmap;
         }
 
         public int ProgressFunc(double Complete, IntPtr Message, IntPtr Data)

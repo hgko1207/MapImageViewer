@@ -21,17 +21,17 @@ namespace ImageViewer
 
         private void OpenCommandExecuted(object sender, ExecutedRoutedEventArgs e)
         {
-
+            CanvasViewer.OpenExecuted();
         }
 
         private void SaveCommandExecuted(object sender, ExecutedRoutedEventArgs e)
         {
-
+            CanvasViewer.SaveExecuted();
         }
 
         private void ZoomFitClick(object sender, RoutedEventArgs e)
         {
-
+            CanvasViewer.ZoomFit();
         }
 
         private void ZoomInClick(object sender, RoutedEventArgs e)

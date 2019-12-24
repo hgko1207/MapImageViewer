@@ -74,7 +74,21 @@
     <Compile Include="Events\EventAggregator.cs" />
     <Compile Include="Events\EventManager.cs" />
     <Compile Include="GdalConfiguration.cs" />
+    <Compile Include="Geometry\AffineTransform.cs" />
+    <Compile Include="Geometry\Dimension.cs" />
+    <Compile Include="Geometry\IShape.cs" />
+    <Compile Include="Geometry\Line.cs" />
+    <Compile Include="Geometry\LineIterator.cs" />
+    <Compile Include="Geometry\MathFP.cs" />
+    <Compile Include="Geometry\NoninvertibleTransformException.cs" />
+    <Compile Include="Geometry\PathIterator.cs" />
+    <Compile Include="Model\Point.cs" />
+    <Compile Include="Geometry\Rectangle.cs" />
+    <Compile Include="Geometry\RectangularShape.cs" />
+    <Compile Include="Geometry\RectIterator.cs" />
     <Compile Include="Utils\GDALReader.cs" />
+    <Compile Include="Utils\ImageControl.cs" />
+    <Compile Include="Utils\SWT2DUtil.cs" />
     <Compile Include="Views\CanvasViewer.xaml.cs">
       <DependentUpon>CanvasViewer.xaml</DependentUpon>
     </Compile>
