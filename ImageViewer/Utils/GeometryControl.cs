@@ -58,6 +58,7 @@ namespace ImageViewer.Images
             try
             {
                 double[] geoTransform = new double[6];
+
                 dataset.GetGeoTransform(geoTransform);
 
                 var ulX = geoTransform[0];
