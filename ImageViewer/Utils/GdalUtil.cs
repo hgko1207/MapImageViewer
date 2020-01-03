@@ -38,6 +38,13 @@ namespace ImageViewer.Utils
             GdalTranslate(srcPath, dstPath, options, callback);
         }
 
+        public static void SubsetImage2(string srcPath, string dstPath, Point start, Point end, Gdal.GDALProgressFuncDelegate callback = null)
+        {
+            string subsetOptions = $"-of GTiff -projwin {start.X} {start.Y} {end.X} {end.Y}";
+            string[] options = subsetOptions.Split(' ');
+            GdalTranslate(srcPath, dstPath, options, callback);
+        }
+
         public static bool GdalTranslate(string srcPath, string dstPath, string[] options, Gdal.GDALProgressFuncDelegate callback = null)
         {
             Dataset result = null;

@@ -43,7 +43,7 @@ namespace ImageViewer.Utils
          */
         private void BuildOverview(int[] levels)
         {
-            
+
             if (dataset.BuildOverviews("NEAREST", levels, new Gdal.GDALProgressFuncDelegate(ProgressFunc), "Sample Data") != (int)CPLErr.CE_None)
             {
                 Console.WriteLine("The BuildOverviews operation doesn't work");
@@ -125,7 +125,7 @@ namespace ImageViewer.Utils
             if (dataset.RasterCount == 1)
                 return ReadGrayBitmap(xOff, yOff, xSize, ySize, overview);
             else
-                return ReadRgbBitmap(xOff, yOff, xSize, ySize);
+                return ReadRgbBitmap(xOff, yOff, xSize, ySize, overview);
         }
 
         private Bitmap ReadGrayBitmap(int xOffset, int yOffset, int xSize, int ySize, int width, int height, int overview)
@@ -219,11 +219,15 @@ namespace ImageViewer.Utils
             double max = minmax[1];
             double stretchRate = 255 / (max - min);
 
-            int[] data = new int[width * height];
-            band.ReadRaster(xOff, yOff, width, height, data, width, height, 0, 0);
-
             Bitmap bitmap = new Bitmap(width, height, PixelFormat.Format24bppRgb);
             BitmapData bitmapData = bitmap.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.ReadWrite, bitmap.PixelFormat);
+            //int stride = bitmapData.Stride;
+            //IntPtr buf = bitmapData.Scan0;
+
+            //band.ReadRaster(xOff, yOff, width, height, buf, width, height, DataType.GDT_Byte, 1, stride);
+
+            int[] data = new int[width * height];
+            band.ReadRaster(xOff, yOff, width, height, data, width, height, 0, 0);
 
             int stride = Math.Abs(bitmapData.Stride);
             byte[] bytes = new byte[height * stride];
@@ -246,6 +250,45 @@ namespace ImageViewer.Utils
             return bitmap;
         }
 
+        private Bitmap ReadRgbBitmap(int xOffset, int yOffset, int xSize, int ySize, int overview)
+        {
+            int level = levels[overview - 1];
+
+            Band redBand = dataset.GetRasterBand(3).GetOverview(overview - 1);
+            Band greenBand = dataset.GetRasterBand(2).GetOverview(overview - 1);
+            Band buleBand = dataset.GetRasterBand(1).GetOverview(overview - 1);
+
+            int width = (xSize - xOffset) / level;
+            int height = (ySize - yOffset) / level;
+            int xOff = xOffset / level;
+            int yOff = yOffset / level;
+
+            int bandWidth = redBand.XSize;
+            int bandWHeight = redBand.YSize;
+            if (xOff + width > bandWidth)
+            {
+                width = bandWidth - xOff;
+            }
+
+            if (yOff + height > bandWHeight)
+            {
+                height = bandWHeight - yOff;
+            }
+
+            PixelFormat pixelFormat = PixelFormat.Format24bppRgb;
+            Bitmap bitmap = new Bitmap(width, height, pixelFormat);
+            BitmapData bitmapData = bitmap.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.ReadWrite, pixelFormat);
+
+            int stride = bitmapData.Stride;
+            IntPtr buf = bitmapData.Scan0;
+
+            redBand.ReadRaster(xOff, yOff, width, height, buf, width, height, DataType.GDT_Byte, 3, stride);
+            greenBand.ReadRaster(xOff, yOff, width, height, buf + 1, width, height, DataType.GDT_Byte, 3, stride);
+            buleBand.ReadRaster(xOff, yOff, width, height, buf + 2, width, height, DataType.GDT_Byte, 3, stride);
+
+            return bitmap;
+        }
+
         private Bitmap ReadRgbBitmap(int xOffset, int yOffset, int width, int height)
         {
             int[] bandMap = new int[4] { 0, 0, 0, 0 };
@@ -254,7 +297,6 @@ namespace ImageViewer.Utils
             bool isIndexed = false;
             int channelSize = 8;
             ColorTable colorTable = null;
-
 
             if (xOffset + width > dataset.RasterXSize)
             {
@@ -414,6 +456,7 @@ namespace ImageViewer.Utils
             {
                 int stride = bitmapData.Stride;
                 IntPtr buf = bitmapData.Scan0;
+
                 dataset.ReadRaster(xOffset, yOffset, width, height, buf, width, height, dataType, channelCount, bandMap, pixelSpace, stride, 1);
             }
             finally
