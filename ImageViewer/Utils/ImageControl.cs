@@ -1,6 +1,8 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -18,6 +20,31 @@ namespace ImageViewer.Utils
                 IntPtr.Zero, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
 
             return bitmapSource;
+        }
+
+        public static BitmapImage BitmapToBitmapImage2(Bitmap bitmap, ImageFormat imageFormat)
+        {
+            BitmapImage bitmapImage = new BitmapImage();
+
+            try
+            {
+                using (MemoryStream memory = new MemoryStream())
+                {
+                    bitmap.Save(memory, imageFormat);
+                    memory.Position = 0;
+                    bitmapImage.BeginInit();
+                    bitmapImage.StreamSource = memory;
+                    bitmapImage.CacheOption = BitmapCacheOption.OnLoad;
+                    bitmapImage.EndInit();
+                    bitmapImage.Freeze();
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.WriteLine(e.ToString());
+            }
+
+            return bitmapImage;
         }
 
         public static Bitmap GetBitmap(byte[] bytes, int width, int height, PixelFormat pixelFormat)

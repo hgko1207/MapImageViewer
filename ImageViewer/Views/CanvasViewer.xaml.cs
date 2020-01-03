@@ -88,6 +88,8 @@ namespace ImageViewer.Views
         public void SaveExecuted()
         {
             SaveFileDialog saveFileDialog = new SaveFileDialog();
+            saveFileDialog.Filter = "PNG Image|*.png|JPeg Image|*.jpg|Bitmap Image|*.bmp|Gif Image|*.gif";
+            saveFileDialog.Title = "Save an Image File";
             if (saveFileDialog.ShowDialog() == true)
             {
                 GdalUtil.SubsetImage(mapImage.FilePath, saveFileDialog.FileName, imageStartPoint, imageEndPoint);
@@ -264,10 +266,11 @@ namespace ImageViewer.Views
                 height = (int)(((float)screenWidth / imageWidth) * imageHeight);
             }
 
-            Point start = ScreenToImage(startPoint);
-            Point end = ScreenToImage(endPoint);
+            imageStartPoint = ScreenToImage(startPoint);
+            imageEndPoint = ScreenToImage(endPoint);
 
-            System.Drawing.Bitmap bitmap = gdalReader.GetBitmap((int)start.X, (int)start.Y, (int)end.X, (int)end.Y, overview);
+            System.Drawing.Bitmap bitmap = gdalReader.GetBitmap((int)imageStartPoint.X, (int)imageStartPoint.Y,
+                (int)imageEndPoint.X, (int)imageEndPoint.Y, overview);
 
             Image image = new Image();
             image.Source = ImageControl.BitmapToBitmapImage(bitmap, mapImage.ImageFormat);
