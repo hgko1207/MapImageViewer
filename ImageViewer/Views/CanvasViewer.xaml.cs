@@ -47,7 +47,7 @@ namespace ImageViewer.Views
         {
             zoomLevel = 0;
             imageStartPoint = new Point(0, 0);
-            imageEndPoint = new Point(mapImage.ImageWidth, mapImage.ImageHeight);
+            imageEndPoint = new Point(0, 0);
         }
 
         private void InitEvent()
@@ -175,6 +175,17 @@ namespace ImageViewer.Views
             double offsetY = Math.Abs(point.Y * (1 - rate));
 
             var tt = TranslateTransform;
+            //if (value > 0)
+            //{
+            //    initTranslateX -= offsetX;
+            //    initTranslateY -= offsetY;
+            //}
+            //else
+            //{
+            //    initTranslateX += offsetX;
+            //    initTranslateY += offsetY;
+            //}
+
             if (value > 0) //확대
             {
                 tt.X -= offsetX;
@@ -212,10 +223,12 @@ namespace ImageViewer.Views
             if (tt.X < 0)
             {
                 startX = Math.Abs(tt.X);
-                //if (endWidth > screenWidth)
-                //{
-                //    endWidth = screenWidth + startX;
-                //}
+                if (endWidth > screenWidth)
+                {
+                    endWidth = screenWidth + startX;
+                    if (endWidth > mapImage.ViewWidth)
+                        endWidth = mapImage.ViewWidth;
+                }
             }
             //else if (tt.X > (initTranslateX * 2))
             //    if (moving)
@@ -227,16 +240,28 @@ namespace ImageViewer.Views
                 if (endHeight > screenHeight)
                 {
                     endHeight = screenHeight + startY;
+                    if (endHeight > mapImage.ViewHeight)
+                        endHeight = mapImage.ViewHeight;
+                }
+            }
+            else
+            {
+                if (endWidth <= screenWidth && endHeight <= screenHeight)
+                {
+
+                }
+                else
+                {
+                    endHeight = endHeight - tt.Y;
                 }
             }
             //else if (tt.Y > (initTranslateY * 2))
-            //    if (moving)
-            //        endHeight = endHeight - tt.Y + (initTranslateY * 2);
+            //    endHeight = endHeight - tt.Y + (initTranslateY * 2);
 
             Point startPoint = new Point(startX, startY);
             Point endPoint = new Point(endWidth, endHeight);
 
-            //Console.WriteLine($"---------------------------------------------------------");
+            Console.WriteLine($"---------------------------------------------------------");
             //Console.WriteLine($"ZoomLevel : {zoomLevel}");
             //Console.WriteLine($"initTranslate : {initTranslateX}, {initTranslateY}");
             //Console.WriteLine($"TranslateTransform : {tt.X}, {tt.Y}");
@@ -245,14 +270,14 @@ namespace ImageViewer.Views
             //Console.WriteLine($"Screen Start : {startX}, {startY}");
             //Console.WriteLine($"Screen end   : {endWidth}, {endHeight}");
 
-            if (endWidth > screenWidth || endHeight > screenHeight)
+            if (endWidth <= screenWidth && endHeight <= screenHeight)
+            {
+                ReloadImage(startPoint, endPoint, 5);
+            }
+            else
             {
                 zoomLevel = zoomLevel / 2;
                 zoomLevel = zoomLevel > 4 ? 1 : 5 - zoomLevel;
-                ReloadImage(startPoint, endPoint, 5);
-            }
-            else if (endWidth <= screenWidth || endHeight <= screenHeight)
-            {
                 ReloadImage(startPoint, endPoint, 5);
             }
         }
@@ -265,19 +290,12 @@ namespace ImageViewer.Views
             image.Width = end.X - start.X;
             image.Height = end.Y - start.Y;
 
-            Console.WriteLine($"---------------------------------------------------------");
             Console.WriteLine($"image : {image.Width}, {image.Height}");
             Console.WriteLine($"start : {start.X}, {start.Y}");
             Console.WriteLine($"end : {end.X}, {end.Y}");
-            Console.WriteLine($"canvas : {-((image.Width - (end.X + start.X)) / 2)}, {-((image.Height - (end.Y + start.Y)) / 2)}");
+            //Console.WriteLine($"canvas : {-((image.Width - (end.X + start.X)) / 2)}, {-((image.Height - (end.Y + start.Y)) / 2)}");
             Console.WriteLine($"imageStartPoint : {imageStartPoint.X}, {imageStartPoint.Y}");
             Console.WriteLine($"imageEndPoint : {imageEndPoint.X}, {imageEndPoint.Y}");
-            Console.WriteLine($"---------------------------------------------------------");
-
-            if (imageEndPoint.Y == mapImage.ImageHeight)
-            {
-                //image.Height = mapImage.ViewHeight;
-            }
 
             Canvas.SetLeft(image, -((image.Width - (end.X + start.X)) / 2));
             Canvas.SetTop(image, -((image.Height - (end.Y + start.Y)) / 2));
@@ -287,34 +305,31 @@ namespace ImageViewer.Views
 
         private Image ReadImage(Point startPoint, Point endPoint, int overview)
         {
-            int imageWidth = mapImage.ImageWidth;
-            int imageHeight = mapImage.ImageHeight;
+            //int imageWidth = mapImage.ImageWidth;
+            //int imageHeight = mapImage.ImageHeight;
 
-            int width = 0;
-            int height = 0;
+            //int width = 0;
+            //int height = 0;
 
-            if (screenWidth > screenHeight)
-            {
-                width = (int)(((float)screenHeight / imageHeight) * imageWidth);
-                height = (int)screenHeight;
-            }
-            else
-            {
-                width = (int)screenWidth;
-                height = (int)(((float)screenWidth / imageWidth) * imageHeight);
-            }
+            //if (screenWidth > screenHeight)
+            //{
+            //    width = (int)(((float)screenHeight / imageHeight) * imageWidth);
+            //    height = (int)screenHeight;
+            //}
+            //else
+            //{
+            //    width = (int)screenWidth;
+            //    height = (int)(((float)screenWidth / imageWidth) * imageHeight);
+            //}
 
             imageStartPoint = ScreenToImage(startPoint);
             imageEndPoint = ScreenToImage(endPoint);
 
-            if (imageStartPoint.X > mapImage.ImageWidth)
-                imageStartPoint.X = mapImage.ImageWidth;
+            if (imageEndPoint.X > mapImage.ImageWidth)
+                imageEndPoint.X = mapImage.ImageWidth;
 
             if (imageEndPoint.Y > mapImage.ImageHeight)
                 imageEndPoint.Y = mapImage.ImageHeight;
-
-            //Console.WriteLine($"start imagePoint: {imageStartPoint.X}, {imageStartPoint.Y}");
-            //Console.WriteLine($"end imagePoint: {imageEndPoint.X}, {imageEndPoint.Y}");
 
             System.Drawing.Bitmap bitmap = gdalReader.GetBitmap((int)imageStartPoint.X, (int)imageStartPoint.Y,
                 (int)imageEndPoint.X, (int)imageEndPoint.Y, overview);
