@@ -32,9 +32,6 @@ namespace ImageViewer.Views
         private GDALReader gdalReader;
         private MapImage mapImage;
 
-        private double initTranslateX;
-        private double initTranslateY;
-
         private MapToolMode mapToolMode = MapToolMode.Panning;
 
         public CanvasViewer()
@@ -159,15 +156,12 @@ namespace ImageViewer.Views
                     tt.Y = (screenHeight - imageHeight) / 2;
                 else
                     tt.Y = -(imageHeight - screenHeight) / 2;
-
-                initTranslateX = tt.X;
-                initTranslateY = tt.Y;
             }
         }
 
         private void Zoom(int value, Point point)
         {
-            double rate = 0.7;
+            double rate = 0.8;
             if (value > 0) //Zoom in, 확대
                 rate = 1 / rate;
 
@@ -175,19 +169,11 @@ namespace ImageViewer.Views
             double offsetY = Math.Abs(point.Y * (1 - rate));
 
             var tt = TranslateTransform;
-            //if (value > 0)
-            //{
-            //    initTranslateX -= offsetX;
-            //    initTranslateY -= offsetY;
-            //}
-            //else
-            //{
-            //    initTranslateX += offsetX;
-            //    initTranslateY += offsetY;
-            //}
-
             if (value > 0) //확대
             {
+                if (zoomLevel > 8)
+                    return;
+
                 tt.X -= offsetX;
                 tt.Y -= offsetY;
                 zoomLevel += 1;
@@ -200,9 +186,6 @@ namespace ImageViewer.Views
                 tt.X += offsetX;
                 tt.Y += offsetY;
                 zoomLevel -= 1;
-
-                initTranslateX = tt.X;
-                initTranslateY = tt.Y;
             }
 
             mapImage.ViewWidth *= rate;
@@ -230,9 +213,13 @@ namespace ImageViewer.Views
                         endWidth = mapImage.ViewWidth;
                 }
             }
-            //else if (tt.X > (initTranslateX * 2))
-            //    if (moving)
-            //        endWidth = endWidth - tt.X + (initTranslateX * 2);
+            else
+            {
+                if (endWidth + tt.X > screenWidth)
+                {
+                    endWidth = screenWidth - tt.X;
+                }
+            }
 
             if (tt.Y < 0)
             {
@@ -246,25 +233,22 @@ namespace ImageViewer.Views
             }
             else
             {
-                if (endWidth <= screenWidth && endHeight <= screenHeight)
+                if (endHeight + tt.Y > screenHeight)
                 {
-
+                    endHeight = screenHeight - tt.Y;
                 }
-                else
-                {
-                    endHeight = endHeight - tt.Y;
-                }
+                //if (endHeight > screenHeight)
+                //    endHeight = screenHeight - tt.Y;
+                //else if (endHeight == screenHeight)
+                //    endHeight = endHeight - tt.Y;
             }
-            //else if (tt.Y > (initTranslateY * 2))
-            //    endHeight = endHeight - tt.Y + (initTranslateY * 2);
 
             Point startPoint = new Point(startX, startY);
             Point endPoint = new Point(endWidth, endHeight);
 
             Console.WriteLine($"---------------------------------------------------------");
-            //Console.WriteLine($"ZoomLevel : {zoomLevel}");
-            //Console.WriteLine($"initTranslate : {initTranslateX}, {initTranslateY}");
-            //Console.WriteLine($"TranslateTransform : {tt.X}, {tt.Y}");
+            Console.WriteLine($"ZoomLevel : {zoomLevel}");
+            //Console.WriteLine($"Translate : {tt.X}, {tt.Y}");
             //Console.WriteLine($"Screen : {screenWidth}, {screenHeight}");
             //Console.WriteLine($"Viewer : {mapImage.ViewWidth}, {mapImage.ViewHeight}");
             //Console.WriteLine($"Screen Start : {startX}, {startY}");
@@ -276,9 +260,10 @@ namespace ImageViewer.Views
             }
             else
             {
-                zoomLevel = zoomLevel / 2;
-                zoomLevel = zoomLevel > 4 ? 1 : 5 - zoomLevel;
-                ReloadImage(startPoint, endPoint, 5);
+                int zoom = zoomLevel / 2;
+                zoom = zoom > 4 ? 1 : 5 - zoom;
+                Console.WriteLine($"Zoom : {zoom}");
+                ReloadImage(startPoint, endPoint, zoom);
             }
         }
 
@@ -290,9 +275,9 @@ namespace ImageViewer.Views
             image.Width = end.X - start.X;
             image.Height = end.Y - start.Y;
 
-            Console.WriteLine($"image : {image.Width}, {image.Height}");
-            Console.WriteLine($"start : {start.X}, {start.Y}");
-            Console.WriteLine($"end : {end.X}, {end.Y}");
+            //Console.WriteLine($"image : {image.Width}, {image.Height}");
+            //Console.WriteLine($"start : {start.X}, {start.Y}");
+            //Console.WriteLine($"end : {end.X}, {end.Y}");
             //Console.WriteLine($"canvas : {-((image.Width - (end.X + start.X)) / 2)}, {-((image.Height - (end.Y + start.Y)) / 2)}");
             Console.WriteLine($"imageStartPoint : {imageStartPoint.X}, {imageStartPoint.Y}");
             Console.WriteLine($"imageEndPoint : {imageEndPoint.X}, {imageEndPoint.Y}");
