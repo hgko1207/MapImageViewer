@@ -6,8 +6,12 @@
 - Image Metadata View(Optics)
 - Zoom In, Out
 - Zoom Fit
-- Image Move
+- Panning
 - Rotate
 - Mouse Wheel
-- Paint Rectangle
+- Draw Rectangle
 - 위경도 표시
+- 레이어 관리
+
+
+
