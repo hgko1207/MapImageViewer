@@ -27,6 +27,8 @@ namespace ImageViewer.Domain
             this.FilePath = filePath;
             this.ImageWidth = headerInfo.Width;
             this.ImageHeight = headerInfo.Height;
+            this.ViewWidth = ImageWidth;
+            this.ViewHeight = ImageHeight;
 
             ImageFormat imageFormat = ImageFormat.Bmp;
             if (filePath.ToLower().Contains(".png") || filePath.ToLower().Contains(".tif"))

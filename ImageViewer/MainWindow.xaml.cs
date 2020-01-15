@@ -11,6 +11,8 @@ namespace ImageViewer
 {
     public partial class MainWindow : Window
     {
+        private List<string> imageList;
+
         public MainWindow()
         {
             InitializeComponent();
@@ -18,6 +20,8 @@ namespace ImageViewer
             EventAggregator.MouseMoveEvent.Subscribe(CanvasMouseMoveEvent);
             EventAggregator.ProgressEvent.Subscribe(ProgressEvent);
             EventAggregator.ImageOpenEvent.Subscribe(ImageOpenEvent);
+
+            imageList = new List<string>();
         }
 
         private void CommonCommandBindingCanExecute(object sender, CanExecuteRoutedEventArgs e)
@@ -75,9 +79,8 @@ namespace ImageViewer
 
         private void ImageOpenEvent(MapImage mapImage)
         {
-            List<string> imageList = new List<string>();
+            ImageListBox.ItemsSource = null;
             imageList.Add(mapImage.HeaderInfo.FileName);
-
             ImageListBox.ItemsSource = imageList;
 
             string image = $"Size (X,Y) : ({mapImage.ImageWidth}, {mapImage.ImageHeight})\r\n" +

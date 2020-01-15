@@ -16,7 +16,6 @@ namespace ImageViewer.Images
     {
         public static bool GetImageBoundary(Dataset dataset, out double minX, out double minY, out double maxX, out double maxY)
         {
-            string wkt = "";
             minX = double.MaxValue;
             minY = double.MaxValue;
             maxX = double.MinValue;
@@ -24,9 +23,8 @@ namespace ImageViewer.Images
 
             try
             {
-                wkt = GetSwath(dataset);
+                string wkt = GetSwath(dataset);
                 string coordWKT = dataset.GetProjectionRef();
-                Console.WriteLine(coordWKT);
                 if (wkt == "" || String.IsNullOrEmpty(coordWKT))
                     return false;
 
